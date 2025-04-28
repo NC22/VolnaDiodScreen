@@ -1,0 +1,38 @@
+{
+   "content_scripts": [ {
+      "run_at": "document_start",
+      "js": [
+          "front.js"
+      ],
+      "matches": ["*://*/*"]
+   } ],
+   "host_permissions": ["*://*/*"], 
+   "manifest_version" : 3,
+   "version": "1.1.6.6",
+   "name": "KellyC Audio",
+   "description": "testt",
+   "icons": { 
+   },
+   "author" : "nradiowave",
+   "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+   },
+   "permissions": [
+        "tabs",
+        "activeTab",
+        "offscreen",
+        "tabCapture"
+    ],
+   "background": {
+        "service_worker": "bg.js"
+   },
+   "action": {
+        "default_icon": "icons/not-recording.png"
+    },
+   "web_accessible_resources":  [{
+      "resources": ["enc/css/*.css"],
+      "matches": [],
+      "extension_ids": []
+    }]
+}

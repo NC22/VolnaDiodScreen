@@ -1,0 +1,400 @@
+/*
+    Common class used to implement base web-server service + JS + HTML user interface
+    Extendable by children classes
+    test
+    todo - message section accepts system warnings & error messages - put them to notificationsSys to prevent collisions or design getInfo with
+    todo - replace Env direct calls by struct with function void referenses \ callbacks & check them by null pointer to prevent crashes
+    option to get sys messages separatly
+*/
+
+#include <WebServer.h>
+// #include "ArduinoJson.h"
+
+WebServer::WebServer(Env * aenv, int port) {
+    
+    ESP8266WebServer server = ESP8266WebServer(port);
+    env = aenv;
+}
+
+void WebServer::tick() {
+    // server.client().connected()
+    server.handleClient();    
+}
+
+void WebServer::runConfigured() {
+
+    auto showDefaultPageCb = std::bind(&WebServer::showDefaultPage, this);
+
+    server.on("/", showDefaultPageCb);
+    server.on("/home", showDefaultPageCb);
+
+    server.on("/out/env.js", std::bind(&WebServer::getEnvJS, this));
+    server.on("/out/style.css", std::bind(&WebServer::getStyleCss, this));
+    server.on("/out/core.js", std::bind(&WebServer::getCoreJs, this));
+    server.on("/out/tools.js", std::bind(&WebServer::getToolsJS, this));
+
+    server.on("/api/reset", std::bind(&WebServer::apiResetConfig, this)); 
+    server.on("/api/reboot", std::bind(&WebServer::apiReboot, this)); 
+
+    server.on("/api/wifilist", std::bind(&WebServer::apiGetWiFiList, this));
+    server.on("/api/getinfo", std::bind(&WebServer::apiGetInfo, this));
+    server.on("/api/commit", std::bind(&WebServer::apiUpdateConfig, this));
+    server.on("/api/clearrom", std::bind(&WebServer::apiClearRom, this));
+
+    server.begin();
+}
+
+void WebServer::getEnvJS() {
+    // server.sendHeader("Cache-Control", "max-age=31536000");
+    // server.setContentLength(webdataSize_env_js);
+    // server.send(200, "text/javascript; charset=utf-8", FPSTR(webdata_env_js)); 
+    
+    server.sendHeader("Cache-Control", "max-age=31536000");
+    server.setContentLength(webdataSize_env_js);
+
+    server.send(200, "text/javascript", "");
+    
+    outputROMData(webdata_env_js, webdataSize_env_js);
+    server.sendContent("");
+}
+
+void WebServer::getStyleCss() {  
+  
+    server.sendHeader("Cache-Control", "max-age=31536000");
+    server.setContentLength(webdataSize_style_css);
+
+    server.send(200, "text/css", "");
+    
+    outputROMData(webdata_style_css, webdataSize_style_css);
+    server.sendContent("");
+    
+  //  server.sendHeader("Cache-Control", "max-age=31536000");
+  //  server.setContentLength(webdataSize_style_css);
+  //  server.send(200, "text/css; charset=utf-8", FPSTR(webdata_style_css)); 
+}
+
+void WebServer::outputROMData(const char * data, unsigned int dataSize) {
+
+    String buffer = "";
+
+    for (unsigned int i = 0; i < dataSize; i++) {
+        char b = pgm_read_byte(&data[i]);
+
+        buffer += b;
+
+        server.sendContent(buffer);
+        buffer = "";
+    }
+}
+
+void WebServer::getCoreJs() {    
+    // server.setContentLength(webdataSize_KellyEnv_js);
+    server.sendHeader("Cache-Control", "max-age=31536000");
+    server.setContentLength(webdataSize_KellyEnv_js);
+
+    server.send(200, "text/javascript", "");
+    
+    outputROMData(webdata_KellyEnv_js, webdataSize_KellyEnv_js);
+    server.sendContent("");
+    
+    // server.send(200, "text/javascript; charset=utf-8", FPSTR(webdata_KellyEnv_js)); 
+}
+
+void WebServer::getToolsJS() {    
+   // server.setContentLength(webdataSize_KellyTools_js);
+
+    server.sendHeader("Cache-Control", "max-age=31536000");
+    server.setContentLength(webdataSize_KellyTools_js);
+    
+    server.send(200, "text/javascript", "");
+
+    // должно быть оптимальней - если просто все разом кидать - крешь - стало нехватать памяти 
+    // CONTENT_LENGTH_UNKNOWN - можно попробовать с webdataSize_KellyTools_js но могут быть разночтения
+    
+    outputROMData(webdata_KellyTools_js, webdataSize_KellyTools_js);
+    server.sendContent("");
+
+    // server.send(200, "text/javascript; charset=utf-8", FPSTR(webdata_KellyTools_js)); 
+}
+
+void WebServer::apiGetInfo() {
+    server.send(200, "application/json", "{" + getInfo() + "}"); 
+}
+
+void WebServer::apiClearRom() {
+    String result = env->getConfig()->commitEEPROM(true) ? "ok" : "fail";
+    server.send(200, "application/json", "{\"status\":\"" + result + "\"}"); 
+}
+
+void WebServer::apiResetConfig() {
+
+    bool resetConfirm = false;
+    bool resetWifi = false;
+
+    for (int i = 0; i < server.args(); i++)  {
+
+        if (server.argName(i) == "reset" && server.arg(i) == "1") {
+
+            resetConfirm = true;
+            
+        } else if (server.argName(i) == "reset-wifi" && server.arg(i) == "1") {
+        
+            resetWifi = true;            
+        }
+    }        
+ 
+    if (resetConfirm) {
+        
+        server.send(200, "application/json", "{\"status\":\"ok\"}"); 
+
+        env->resetConfig(resetWifi);         
+        env->restart("Config reset");
+
+    } else {
+        server.send(200, "application/json", "{\"status\":\"no\"}");  
+    }
+}
+
+
+void WebServer::apiGetWiFiList() {
+
+    server.send(200, "application/json", getWiFiListJSON()); 
+}
+
+String WebServer::getInfo() {
+
+    String json = ""; // "{";
+
+    json += "\"wifiConnected\":";
+    wl_status_t status = WiFi.status(); // todo get status from wifimanager - lastConnectStatus
+
+    String defaultW = ",\"wifiName\":\"" + env->getConfig()->getString(cWifiNetwork) + "\"";
+    
+    if ( status == WL_CONNECTED) {
+        json += "1,\"wifiName\":\"" + WiFi.SSID() + "\",\"wifiDbm\":" + String(WiFi.RSSI());        
+    } else if (status == WL_CONNECT_FAILED) {
+        json += "-1" + defaultW ;
+    } else if (status == WL_WRONG_PASSWORD) {
+        json += "-2" + defaultW;
+    } else if (status == WL_NO_SSID_AVAIL) {
+        json += "-3" + defaultW;
+    } else {
+        json += "-4" + defaultW;
+    }
+
+    json += ",\"ram\":" + String(ESP.getFreeHeap());
+    json += ",\"dt\":\"";
+    time_t now = time(nullptr);
+    struct tm stnow;
+    localtime_r(&now, &stnow);
+
+    char buffer[64];
+    strftime(buffer, sizeof(buffer), "%H:%M:%S %d.%m.%Y", &stnow);
+    
+    json += buffer;
+    json += "\"";
+
+   // json += "}";
+
+    return json;
+}
+
+String WebServer::getWiFiListJSON() {
+     
+  String ssid;
+  
+  int32_t rssi;
+  uint8_t encryptionType;
+  uint8_t *bssid;
+  int32_t channel;
+
+  bool hidden;
+  int scanResult;
+  
+  uint8_t encType;  
+  uint8_t hiddenT;
+  
+  Serial.println(F("Starting WiFi scan..."));
+
+  scanResult = WiFi.scanNetworks(/*async=*/ false, /*hidden=*/ false);
+  String json = "{\"networks\":[";
+
+  if (scanResult == 0) {
+
+  } else if (scanResult > 0) {
+    
+    if (scanResult > 40) scanResult = 40;
+    
+    for (int8_t i = 0; i < scanResult; i++) {
+      
+       if (!WiFi.getNetworkInfo(i, ssid, encryptionType, rssi, bssid, channel, hidden)) continue;
+       
+       encType = encryptionType == ENC_TYPE_NONE ? 0 : 1;
+       hiddenT = hidden ? 1 : 0;
+       
+       json += "{\"name\":\"" + ssid + "\",\"encrypted\":" + String(encType) + ",\"dbm\":" + String(rssi) + ",\"channel\":" + String(channel) + ",\"hidden\":" + String(hiddenT) + "}";
+
+       if (i < scanResult - 1) json += ',';
+
+       yield();
+    }
+
+  } else {
+
+    return "{\"error\":\"WiFi scan error : " + String(scanResult) + "\"}";
+
+  }
+
+  json += "]}";
+
+  return json;
+}
+
+void WebServer::apiReboot() {
+
+    bool rebootConfirm = false;
+
+    for (int i = 0; i < server.args(); i++)  {
+
+        if (server.argName(i) == "reboot" && server.arg(i) == "1") {
+            rebootConfirm = true;
+            break;
+        }
+    } 
+
+    if (rebootConfirm) {
+        
+        server.send(200, "application/json", "{\"status\":\"ok\"}");  
+        env->restart();
+               
+    } else server.send(200, "application/json", "{\"status\":\"no\"}"); 
+
+}
+
+void WebServer::apiUpdateConfig() {
+
+    unsigned int argCollected = 0; unsigned int affectedKeys = 0;
+    String ignoredKey = ""; // invalid, empty or incompatible data for field type
+    String notExistKey = "";
+    bool updateScreen = false;
+    bool skipCommit = false;
+    bool restartRequired = false;
+    std::vector<cfgOptionKeys> updatedKeys;
+
+    for (int i = 0; i < server.args(); i++)  {
+
+        if (server.argName(i) == "commit") {
+            if (server.arg(i) == "skip") skipCommit = true;
+            continue;
+        }
+
+        argCollected++;
+        
+        String rawValue = server.arg(i); 
+        cfgOptionKeys optionKey = env->getConfig()->getOptionKey(server.argName(i).c_str());
+        
+        if (optionKey == cNull) {
+            notExistKey += notExistKey ? "," + server.argName(i) : server.argName(i);
+            continue;
+        }
+
+        // common important filter for password, todo - notify from client side if needed
+        if (optionKey == cWifiPassword || optionKey == cWifiPasswordFallback) {
+            if (rawValue.length() > 0) {
+                if (rawValue.length() < 8 || rawValue.length() > 32) {
+                    Serial.println("wrong password length (unsetted or min 8 max 32 letters)");
+                    ignoredKey += ignoredKey ? "," + server.argName(i) : server.argName(i);
+                    continue;
+                }
+            }
+        }
+
+        if (!env->getConfig()->set(optionKey, rawValue)) {
+            ignoredKey += ignoredKey ? "," + server.argName(i) : server.argName(i);
+            continue;
+        } else {
+            affectedKeys++;
+            updatedKeys.push_back(optionKey);
+        }
+
+        if (!env->getConfig()->isReloadRequired(optionKey)) {
+            updateScreen = true;
+        } else {
+            restartRequired = true;
+        }
+    } 
+
+    env->validateConfig(-1, &updatedKeys);    
+    if (!skipCommit && affectedKeys > 0) env->commitConfig();
+    else {
+        Serial.println("skip commit");
+    }
+
+    Serial.println("apiUpdateConfig : total : " + String(argCollected) + ", ignored : [" + ignoredKey + "] | not exist : [" + notExistKey + "]");
+
+    String restart = restartRequired ? "true" : "false";
+    server.send(200, "application/json", "{\"restart\":" + restart + ",\"status\":\"ok\",\"ignored\":\"" + ignoredKey + "\",\"notexist\":\"" + notExistKey + "\"}"); 
+    
+    // todo - add to env access to time, wifi, to prevent reload in some cases
+    if (updateScreen) {
+                
+        Serial.println("no need restart...");
+         
+    } else {
+        
+        Serial.println("need restart...");
+         
+        // delay(500);
+        // ESP.restart();
+    }
+}
+
+
+void WebServer::showDefaultPage() {
+    
+    String currentCfg = env->getConfig()->getOptionsJSON();
+           
+    server.setContentLength(currentCfg.length() + webdataSize_client_html + webdataSize_client_end_html + webdataSize_init_js);
+    // server.send(200, "text/html; charset=utf-8", FPSTR(webdata_client_html) + scripts ); -- join strings - unsafe
+     
+    server.send(200, "text/html", "");
+    
+    outputROMData(webdata_client_html, webdataSize_client_html);
+    
+    server.sendContent(currentCfg);
+    
+    outputROMData(webdata_init_js, webdataSize_init_js);
+    outputROMData(webdata_client_end_html, webdataSize_client_end_html);
+    
+    server.sendContent("");
+/*
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    server.sendHeader("Pragma", "no-cache");
+    server.sendHeader("Expires", "-1");
+
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+
+   // server.sendHeader("HTTP/1.1 200 OK");
+    String ending = "</script></body></html>";
+    String configVars = env->getConfig()->getOptionsJSON();
+
+    int size = ending.length() + webdataSize_client_html + webdataSize_env_js + webdataSize_scripts_js;
+    
+    Serial.println("-----size----");
+    Serial.println(size);
+
+    // server.setContentLength(size);
+
+    server.send(200, "text/html", "");
+
+    server.sendContent(FPSTR(webdata_client_html));
+    server.sendContent(FPSTR(webdata_env_js));
+    server.sendContent(configVars);
+    server.sendContent(FPSTR(webdata_scripts_js));
+
+    server.sendContent(ending);
+    server.sendContent("");
+
+    server.client().stop();
+*/
+}

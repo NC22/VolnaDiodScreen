@@ -1,0 +1,39 @@
+{
+   "content_scripts": [ {
+      "run_at": "document_start",
+      "js": [ 
+            "front.js"
+      ],
+      "all_frames": false,
+      "matches": [ 
+        "http://*/*",
+        "https://*/*"
+        ]
+   } ],
+   "manifest_version" : 2,
+   "version": "1.2.8.9",
+   "name": "KellyC Audio",
+   "description": "test",
+   "author" : "nradiowave",
+   "permissions": [
+        "storage",
+        "tabs",
+        "tabCapture",
+        "<all_urls>"
+    ],
+   "background": {
+    "scripts": [
+        "bg.js"
+    ],
+    "persistent": true
+   },  
+   "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+   },
+   "web_accessible_resources": [
+        "env/css/*.css",
+        "env/html/*.html",
+        "env/dynamic/*.js"
+    ]
+}
